@@ -124,7 +124,13 @@ IMPORTANT INSTRUCTIONS:
   5. 📅 Day-by-day itinerary (morning/afternoon/evening) for every day
   6. 🎒 Packing tips and travel notes
 - Always mention that your data is based on web search results
-- Keep tone warm, practical, and enthusiastic`;
+- Keep tone warm, practical, and enthusiastic
+
+CONVERSATION RULES — VERY IMPORTANT:
+- If the user says something casual like "ok", "thanks", "thank you", "great", "cool", "awesome" — reply with a SHORT friendly response like "You are welcome! Have an amazing trip! 🌍". DO NOT repeat the travel plan.
+- Only provide the full travel plan when the user asks a travel question.
+- Never repeat information already shared unless explicitly asked.
+- Keep follow-up responses SHORT and conversational unless detail is needed.`;
   };
 
   // Countdown timer for rate limit retry
