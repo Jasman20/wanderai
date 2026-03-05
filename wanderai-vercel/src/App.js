@@ -101,14 +101,16 @@ function CardsSection({ cards, cardsLoading }) {
   if (!cards || (!cards.hotels?.length && !cards.attractions?.length)) return null;
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div style={{ borderTop: "1px solid rgba(201,169,110,0.15)", borderBottom: "1px solid rgba(201,169,110,0.15)", padding: "18px 0", margin: "8px 0 18px" }}>
       {/* Hotels */}
       {cards.hotels?.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#c9a96e", marginBottom: 10 }}>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#c9a96e", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ height: 1, flex: 1, background: "rgba(201,169,110,0.2)" }} />
             🏨 Recommended Hotels
+            <span style={{ height: 1, flex: 1, background: "rgba(201,169,110,0.2)" }} />
           </div>
-          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8, scrollbarWidth: "thin" }}>
+          <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 10, scrollbarWidth: "thin" }}>
             {cards.hotels.map((hotel, i) => <HotelCard key={i} hotel={hotel} />)}
           </div>
         </div>
@@ -117,10 +119,12 @@ function CardsSection({ cards, cardsLoading }) {
       {/* Attractions */}
       {cards.attractions?.length > 0 && (
         <div>
-          <div style={{ fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#c9a96e", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#c9a96e", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ height: 1, flex: 1, background: "rgba(201,169,110,0.2)" }} />
             🗺️ Top Attractions
+            <span style={{ height: 1, flex: 1, background: "rgba(201,169,110,0.2)" }} />
           </div>
-          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8, scrollbarWidth: "thin" }}>
+          <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 10, scrollbarWidth: "thin" }}>
             {cards.attractions.map((attraction, i) => <AttractionCard key={i} attraction={attraction} />)}
           </div>
         </div>
@@ -509,11 +513,8 @@ CONVERSATION RULES:
                 </div>
               )}
 
-              {/* ✅ Hotel + Attraction Cards */}
-              <CardsSection cards={cards} cardsLoading={cardsLoading} />
-
-              {/* Chat window */}
-              <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(201,169,110,0.12)", borderRadius: 18, padding: "18px 18px 8px", height: 400, overflowY: "auto", marginBottom: 12, scrollbarWidth: "thin" }}>
+              {/* Chat window — cards live inside here */}
+              <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(201,169,110,0.12)", borderRadius: 18, padding: "18px 18px 8px", height: 580, overflowY: "auto", marginBottom: 12, scrollbarWidth: "thin" }}>
                 {messages.length === 0 && !loading && !searching && (
                   <div style={{ textAlign: "center", color: "rgba(232,220,200,0.3)", marginTop: 80, fontSize: 13 }}>
                     <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
@@ -526,6 +527,12 @@ CONVERSATION RULES:
                     {m.role === "assistant" && m.searched?.length > 0 && <SearchedBadges queries={m.searched} />}
                   </div>
                 ))}
+                {/* Cards appear inside chat after first AI response */}
+                {(cards || cardsLoading) && messages.length >= 2 && (
+                  <div style={{ marginBottom: 16, animation: "fadeUp 0.5s ease" }}>
+                    <CardsSection cards={cards} cardsLoading={cardsLoading} />
+                  </div>
+                )}
                 {searching && <SearchingIndicator />}
                 {loading && !searching && (
                   <div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: 46, marginBottom: 16 }}>
