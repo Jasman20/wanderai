@@ -1,16 +1,8 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "api/chat.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "build" }
-    }
-  ],
+  "installCommand": "npm install",
+  "buildCommand": "react-scripts build",
+  "outputDirectory": "build",
   "routes": [
     {
       "src": "/api/(.*)",
