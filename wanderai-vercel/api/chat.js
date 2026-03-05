@@ -2,27 +2,43 @@
 
 const fetch = require("node-fetch");
 
-// ✅ Strips any leaked <function=...> or tool call text the AI accidentally outputs
 function cleanReply(text) {
   return text
-    .replace(/<function=\w+>[\s\S]*?<\/function>/g, "")   // removes <function=web_search>...</function>
-    .replace(/```json[\s\S]*?```/g, "")                    // removes raw JSON blocks
-    .replace(/\{"query":.*?\}/g, "")                       // removes stray JSON queries
-    .replace(/Now, let's search.*?\./g, "")                // removes "Now let's search..." lines
-    .replace(/\n{3,}/g, "\n\n")                            // collapses excessive blank lines
+    .replace(/<function=\w+>[\s\S]*?<\/function>/g, "")
+    .replace(/```json[\s\S]*?```/g, "")
+    .replace(/\{"query":.*?\}/g, "")
+    .replace(/Now,?\s*let'?s search.*?\./gi, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+// ─── Plain call to Groq with NO tools (fallback) ──────────────────────────
+async function callGroqDirect(messages, systemPrompt) {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      max_tokens: 2000,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+    }),
+  });
+  return res;
 }
 
 export default async function handler(req, res) {
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const { messages, systemPrompt } = req.body;
@@ -32,7 +48,7 @@ export default async function handler(req, res) {
 
   try {
 
-    // ─── STEP 1: Call Groq with web search tool ────────────────────────
+    // ─── STEP 1: Try calling Groq WITH web search tool ─────────────────
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -47,11 +63,11 @@ export default async function handler(req, res) {
             type: "function",
             function: {
               name: "web_search",
-              description: "Search the web for real-time travel information: weather, hotels, attractions, food, transport, travel advisories.",
+              description: "Search the web for real-time travel info: weather, hotels, attractions, food, transport.",
               parameters: {
                 type: "object",
                 properties: {
-                  query: { type: "string", description: "The search query" },
+                  query: { type: "string", description: "Search query" },
                 },
                 required: ["query"],
               },
@@ -62,8 +78,7 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            // ✅ Explicitly tell the AI NOT to write function calls as text
-            content: systemPrompt + "\n\nCRITICAL: Never write <function=...> or tool call syntax in your response text. Use tools silently. Only write the final travel plan text for the user to read.",
+            content: systemPrompt + "\n\nIMPORTANT: Never write <function=...> or tool call syntax in your text response. Only write the final answer for the user.",
           },
           ...messages,
         ],
@@ -72,8 +87,27 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // ─── Handle errors ─────────────────────────────────────────────────
+    // ─── Handle Groq errors ────────────────────────────────────────────
     if (!response.ok) {
+      // ✅ KEY FIX: "Failed to call a function" error — retry WITHOUT tools
+      const errMsg = data?.error?.message || "";
+      if (
+        response.status === 400 &&
+        (errMsg.includes("failed_generation") || errMsg.includes("Failed to call a function") || errMsg.includes("function"))
+      ) {
+        console.log("Tool calling failed — retrying without tools...");
+        const fallbackRes = await callGroqDirect(messages, systemPrompt);
+        const fallbackData = await fallbackRes.json();
+        if (!fallbackRes.ok) {
+          return res.status(fallbackRes.status).json({
+            error: "api_error",
+            message: fallbackData?.error?.message || "Something went wrong. Please try again.",
+          });
+        }
+        const reply = fallbackData.choices?.[0]?.message?.content || "No response.";
+        return res.status(200).json({ reply: cleanReply(reply), searched: [] });
+      }
+
       if (response.status === 429) {
         const retryAfter = response.headers.get("retry-after") || 60;
         return res.status(429).json({
@@ -96,20 +130,24 @@ export default async function handler(req, res) {
       }
       return res.status(response.status).json({
         error: "api_error",
-        message: data?.error?.message || "Something went wrong. Please try again.",
+        message: errMsg || "Something went wrong. Please try again.",
       });
     }
 
     const choice = data.choices?.[0];
 
-    // ─── STEP 2: AI wants to search the web ───────────────────────────
+    // ─── STEP 2: AI wants to use web search ───────────────────────────
     if (choice?.finish_reason === "tool_calls") {
       const toolCalls = choice.message.tool_calls;
       const searchResults = [];
 
-      // ─── STEP 3: Run each search ───────────────────────────────────
       for (const toolCall of toolCalls) {
-        const query = JSON.parse(toolCall.function.arguments).query;
+        let query = "";
+        try {
+          query = JSON.parse(toolCall.function.arguments).query;
+        } catch {
+          query = toolCall.function.arguments;
+        }
         console.log(`🔍 Searching: "${query}"`);
 
         try {
@@ -129,17 +167,16 @@ export default async function handler(req, res) {
             query,
             result: resultText || `No live results for "${query}". Use your training knowledge.`,
           });
-
         } catch {
           searchResults.push({
             toolCallId: toolCall.id,
             query,
-            result: `Could not fetch live data for "${query}". Use training knowledge instead.`,
+            result: `Could not fetch data for "${query}". Use training knowledge instead.`,
           });
         }
       }
 
-      // ─── STEP 4: Send search results back to AI ────────────────────
+      // ─── STEP 3: Send search results back to AI ───────────────────
       const finalResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -152,7 +189,7 @@ export default async function handler(req, res) {
           messages: [
             {
               role: "system",
-              content: systemPrompt + "\n\nCRITICAL: Never write <function=...> or tool call syntax in your response. Only write the final travel plan for the user.",
+              content: systemPrompt + "\n\nNever write <function=...> syntax in your response. Only write the final travel plan.",
             },
             ...messages,
             choice.message,
@@ -166,23 +203,40 @@ export default async function handler(req, res) {
       });
 
       const finalData = await finalResponse.json();
-      const rawReply = finalData.choices?.[0]?.message?.content || "No response.";
 
+      // ✅ If second call also fails, fall back to direct call
+      if (!finalResponse.ok) {
+        console.log("Final tool response failed — falling back to direct call");
+        const fallbackRes = await callGroqDirect(messages, systemPrompt);
+        const fallbackData = await fallbackRes.json();
+        const reply = fallbackData.choices?.[0]?.message?.content || "No response.";
+        return res.status(200).json({ reply: cleanReply(reply), searched: [] });
+      }
+
+      const rawReply = finalData.choices?.[0]?.message?.content || "No response.";
       return res.status(200).json({
         reply: cleanReply(rawReply),
         searched: searchResults.map((r) => r.query),
       });
     }
 
-    // ─── AI responded directly without searching ───────────────────────
+    // ─── AI responded directly ─────────────────────────────────────────
     const rawReply = choice?.message?.content || "No response.";
     return res.status(200).json({ reply: cleanReply(rawReply), searched: [] });
 
   } catch (err) {
     console.error("Function error:", err);
-    return res.status(500).json({
-      error: "server_error",
-      message: "Unexpected error. Please try again shortly.",
-    });
+    // Last resort — try a plain call
+    try {
+      const fallbackRes = await callGroqDirect(messages, systemPrompt);
+      const fallbackData = await fallbackRes.json();
+      const reply = fallbackData.choices?.[0]?.message?.content || "No response.";
+      return res.status(200).json({ reply: cleanReply(reply), searched: [] });
+    } catch {
+      return res.status(500).json({
+        error: "server_error",
+        message: "Unexpected error. Please try again shortly.",
+      });
+    }
   }
 }
